@@ -1,65 +1,105 @@
 # HAProxy Rollback Workflow
 # Manually trigger rollback to last known good configuration
 #
+# Prerequisites:
+# - Self-hosted runners on each HA node with labels: self-hosted, haproxy, <node-name>
+# - Runner group named 'ha-servers' (CUSTOMIZE if different)
+# - RUNNER_PAT secret with admin:org scope for runner detection
+#
 # Usage:
 # 1. Go to Actions tab
 # 2. Select "Rollback HAProxy"
 # 3. Click "Run workflow"
-# 4. Optionally filter to specific node(s)
+# 4. Enter rollback reason
 
 name: Rollback HAProxy
 
 on:
   workflow_dispatch:
     inputs:
-      target_node:
-        description: 'Target node (leave empty for all nodes)'
-        type: choice
-        required: false
-        default: 'all'
-        options:
-          - all
-          - ha01
-          - ha02
-          - ha03
       reason:
-        description: 'Reason for rollback'
-        type: string
+        description: 'Why rollback?'
         required: false
+        default: 'Manual rollback'
 
 concurrency:
   group: haproxy-deploy
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
+  check-runners:
+    name: Check available runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_runners: ${{ steps.set-matrix.outputs.has_runners }}
+    steps:
+      - name: Get online self-hosted runners
+        id: set-matrix
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_PAT }}
+        run: |
+          # CUSTOMIZE: Update 'ha-servers' to match your runner group name
+          RUNNER_GROUP="ha-servers"
+          
+          # Get runner group ID
+          GROUP_ID=$(gh api orgs/${{ github.repository_owner }}/actions/runner-groups \
+            --jq ".runner_groups[] | select(.name == \"${RUNNER_GROUP}\") | .id")
+          
+          if [ -z "$GROUP_ID" ]; then
+            echo "Runner group '${RUNNER_GROUP}' not found!"
+            echo "matrix={\"node\":[]}" >> $GITHUB_OUTPUT
+            echo "has_runners=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Found runner group ID: $GROUP_ID"
+          
+          # Get all online runners from the group with 'haproxy' label
+          RUNNERS=$(gh api orgs/${{ github.repository_owner }}/actions/runner-groups/${GROUP_ID}/runners \
+            --jq '[.runners[] | select(.status == "online" and (.labels | map(.name) | contains(["haproxy"]))) | .labels[] | select(.name | test("^ha[0-9]+$")) | .name] | unique')
+          
+          echo "Online haproxy runners: $RUNNERS"
+          
+          if [ "$RUNNERS" == "[]" ] || [ -z "$RUNNERS" ]; then
+            echo "No online runners found!"
+            echo "matrix={\"node\":[]}" >> $GITHUB_OUTPUT
+            echo "has_runners=false" >> $GITHUB_OUTPUT
+          else
+            echo "matrix={\"node\":$RUNNERS}" >> $GITHUB_OUTPUT
+            echo "has_runners=true" >> $GITHUB_OUTPUT
+          fi
+
   rollback:
-    name: Rollback ${{ matrix.node }}
+    name: Rollback on ${{ matrix.node }}
+    needs: check-runners
+    if: needs.check-runners.outputs.has_runners == 'true'
+    continue-on-error: true
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.check-runners.outputs.matrix) }}
+
     runs-on:
       - self-hosted
       - haproxy
       - ${{ matrix.node }}
 
-    # Run on all nodes or just the specified one
-    if: ${{ inputs.target_node == 'all' || inputs.target_node == matrix.node }}
-
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        # CUSTOMIZE: Update with your HA node names
-        include:
-          - node: ha01
-          - node: ha02
-          - node: ha03
-
     steps:
-      - name: Log rollback reason
-        if: ${{ inputs.reason }}
-        run: |
-          echo "📝 Rollback reason: ${{ inputs.reason }}"
-
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Ensure scripts are executable
+        run: chmod +x ./scripts/*.sh
+
+      - name: Log rollback reason
+        run: |
+          echo "📝 Rollback reason: ${{ inputs.reason }}"
 
       - name: Execute rollback
         run: |

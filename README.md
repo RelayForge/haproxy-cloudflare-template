@@ -41,13 +41,16 @@ Go to **Settings → Secrets → Actions** and add:
 |--------|-------------|
 | `CLOUDFLARE_API_TOKEN` | API token with Zone:DNS:Edit permission |
 | `CLOUDFLARE_ZONE_ID` | Your CloudFlare zone ID |
+| `RUNNER_PAT` | GitHub PAT with `admin:org` scope for runner detection |
 
 ### 4. Set Up Self-Hosted Runners
 
-Install GitHub Actions runners on each HA node with labels:
-- `self-hosted`
-- `haproxy`
-- `<node-name>` (e.g., `ha01`, `ha02`, `ha03`)
+1. Create a runner group named `ha-servers` in your organization
+2. Install GitHub Actions runners on each HA node with labels:
+   - `self-hosted`
+   - `haproxy`
+   - `<node-name>` (e.g., `ha01`, `ha02`, `ha03`)
+3. Add runners to the `ha-servers` group
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed setup instructions.
 

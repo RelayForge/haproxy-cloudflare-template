@@ -3,67 +3,123 @@
 #
 # Prerequisites:
 # - Self-hosted runners on each HA node with labels: self-hosted, haproxy, <node-name>
+# - Runner group named 'ha-servers' (CUSTOMIZE if different)
+# - RUNNER_PAT secret with admin:org scope for runner detection
 # - Scripts: scripts/apply_local.sh, scripts/rollback_local.sh
 # - HAProxy config: haproxy/haproxy.cfg
 
 name: Deploy HAProxy
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'haproxy/**'
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Validate config only (no reload)'
-        type: boolean
-        default: false
+      confirm:
+        description: 'Type "deploy" to confirm deployment'
+        required: true
+        type: string
 
 # Prevent concurrent deployments
 concurrency:
   group: haproxy-deploy
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
+  validate-input:
+    name: Validate confirmation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        run: |
+          if [[ "${{ inputs.confirm }}" != "deploy" ]]; then
+            echo "::error::Deployment not confirmed. Please type 'deploy' to confirm."
+            exit 1
+          fi
+          echo "✅ Deployment confirmed"
+
+  check-runners:
+    name: Check available runners
+    needs: validate-input
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_runners: ${{ steps.set-matrix.outputs.has_runners }}
+    steps:
+      - name: Get online self-hosted runners
+        id: set-matrix
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_PAT }}
+        run: |
+          # CUSTOMIZE: Update 'ha-servers' to match your runner group name
+          RUNNER_GROUP="ha-servers"
+          
+          # Get runner group ID
+          GROUP_ID=$(gh api orgs/${{ github.repository_owner }}/actions/runner-groups \
+            --jq ".runner_groups[] | select(.name == \"${RUNNER_GROUP}\") | .id")
+          
+          if [ -z "$GROUP_ID" ]; then
+            echo "Runner group '${RUNNER_GROUP}' not found!"
+            echo "matrix={\"node\":[]}" >> $GITHUB_OUTPUT
+            echo "has_runners=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Found runner group ID: $GROUP_ID"
+          
+          # Get all online runners from the group with 'haproxy' label
+          RUNNERS=$(gh api orgs/${{ github.repository_owner }}/actions/runner-groups/${GROUP_ID}/runners \
+            --jq '[.runners[] | select(.status == "online" and (.labels | map(.name) | contains(["haproxy"]))) | .labels[] | select(.name | test("^ha[0-9]+$")) | .name] | unique')
+          
+          echo "Online haproxy runners: $RUNNERS"
+          
+          if [ "$RUNNERS" == "[]" ] || [ -z "$RUNNERS" ]; then
+            echo "No online runners found!"
+            echo "matrix={\"node\":[]}" >> $GITHUB_OUTPUT
+            echo "has_runners=false" >> $GITHUB_OUTPUT
+          else
+            echo "matrix={\"node\":$RUNNERS}" >> $GITHUB_OUTPUT
+            echo "has_runners=true" >> $GITHUB_OUTPUT
+          fi
+
   deploy:
-    name: Deploy to ${{ matrix.node }}
+    name: Deploy on ${{ matrix.node }}
+    needs: check-runners
+    if: needs.check-runners.outputs.has_runners == 'true'
+    continue-on-error: true
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.check-runners.outputs.matrix) }}
+
     runs-on:
       - self-hosted
       - haproxy
       - ${{ matrix.node }}
 
-    strategy:
-      fail-fast: true
-      max-parallel: 1
-      matrix:
-        # CUSTOMIZE: Update with your HA node names
-        # These must match the runner labels on each node
-        include:
-          - node: ha01
-          - node: ha02
-          - node: ha03
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate HAProxy configuration
+      - name: Ensure scripts are executable
+        run: chmod +x ./scripts/*.sh
+
+      - name: Pre-flight info
         run: |
-          set -euo pipefail
-          echo "Validating HAProxy configuration..."
-          sudo /usr/sbin/haproxy -c -f haproxy/haproxy.cfg
-          echo "✅ Configuration is valid"
+          echo "Host: $(hostname -f 2>/dev/null || hostname)"
+          haproxy -v || true
+          systemctl status haproxy --no-pager || true
 
       - name: Apply configuration
-        if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
           ./scripts/apply_local.sh
 
       - name: Rollback on failure
-        if: failure() && !inputs.dry_run
+        if: failure()
         run: |
           set -euo pipefail
           echo "⚠️ Deployment failed, initiating rollback..."

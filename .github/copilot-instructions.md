@@ -60,17 +60,45 @@ Use `example.com` in example configurations.
 
 ## GitHub Actions Conventions
 
+### Dynamic Runner Detection
+
+Workflows use dynamic runner detection to find online runners:
+
+```yaml
+jobs:
+  check-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_runners: ${{ steps.set-matrix.outputs.has_runners }}
+    steps:
+      - name: Get online self-hosted runners
+        id: set-matrix
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_PAT }}
+        run: |
+          # Detect online runners from 'ha-servers' group
+          # with 'haproxy' label and node labels matching ha[0-9]+
+```
+
+### Required Secrets
+
+- `RUNNER_PAT` - GitHub PAT with `admin:org` scope
+- `CLOUDFLARE_API_TOKEN` - CloudFlare API token
+- `CLOUDFLARE_ZONE_ID` - CloudFlare zone ID
+
+### Runner Group
+
+- Runners must be in organization runner group named `ha-servers`
+- Each runner needs labels: `self-hosted`, `haproxy`, `ha01`/`ha02`/etc.
+
 ### Matrix Strategy for Rolling Deploy
 
 ```yaml
 strategy:
-  fail-fast: true
+  fail-fast: false
   max-parallel: 1
-  matrix:
-    include:
-      - node: ha01
-      - node: ha02
-      - node: ha03
+  matrix: ${{ fromJson(needs.check-runners.outputs.matrix) }}
 ```
 
 ### Runner Selection

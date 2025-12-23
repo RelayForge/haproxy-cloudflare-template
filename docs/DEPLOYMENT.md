@@ -11,17 +11,44 @@ Best for: Production environments with dedicated HA nodes.
 ```
 GitHub Repository
        │
-       ▼ (push to main)
+       ▼ (workflow_dispatch)
 GitHub Actions
+       │
+       ▼ (check-runners job)
+Detect Online Runners
        │
        ├──► Self-hosted Runner (ha01) ──► HAProxy (ha01)
        ├──► Self-hosted Runner (ha02) ──► HAProxy (ha02)
        └──► Self-hosted Runner (ha03) ──► HAProxy (ha03)
 ```
 
+### Prerequisites
+
+| Requirement | Description |
+|-------------|-------------|
+| Runner Group | Organization runner group named `ha-servers` |
+| RUNNER_PAT | GitHub PAT with `admin:org` scope |
+| Runner Labels | `self-hosted`, `haproxy`, `ha01`/`ha02`/`ha03` |
+
 ### Setup
 
-#### 1. Install Runner on Each HA Node
+#### 1. Create Runner Group (Organization)
+
+1. Go to **Organization** → **Settings** → **Actions** → **Runner groups**
+2. Click **"New runner group"**
+3. Name: `ha-servers`
+4. Select repositories that can access this group
+5. Click **"Create group"**
+
+#### 2. Create RUNNER_PAT Secret
+
+1. Go to **GitHub** → **Settings** → **Developer settings** → **Personal access tokens**
+2. Click **"Generate new token (classic)"**
+3. Select scope: `admin:org`
+4. Generate and copy the token
+5. Add as repository secret: `RUNNER_PAT`
+
+#### 3. Install Runner on Each HA Node
 
 ```bash
 # Create runner directory
@@ -35,20 +62,21 @@ curl -o actions-runner-linux-x64-2.311.0.tar.gz -L \
 tar xzf ./actions-runner-linux-x64-2.311.0.tar.gz
 ```
 
-#### 2. Configure Runner
+#### 4. Configure Runner
 
-Go to your repository → **Settings** → **Actions** → **Runners** → **New self-hosted runner**
+Go to **Organization** → **Settings** → **Actions** → **Runners** → **New runner**
 
 ```bash
 # Configure with token from GitHub
-./config.sh --url https://github.com/YOUR-ORG/YOUR-REPO \
+./config.sh --url https://github.com/YOUR-ORG \
   --token YOUR-TOKEN \
   --name ha01 \
   --labels self-hosted,haproxy,ha01 \
+  --runnergroup ha-servers \
   --unattended
 ```
 
-#### 3. Install as Service
+#### 5. Install as Service
 
 ```bash
 sudo ./svc.sh install
@@ -56,7 +84,7 @@ sudo ./svc.sh start
 sudo ./svc.sh status
 ```
 
-#### 4. Required Sudo Permissions
+#### 6. Required Sudo Permissions
 
 Add to `/etc/sudoers.d/haproxy-deploy`:
 
@@ -70,24 +98,41 @@ runner-user ALL=(ALL) NOPASSWD: /bin/systemctl restart haproxy
 runner-user ALL=(ALL) NOPASSWD: /bin/systemctl status haproxy
 ```
 
+### How Dynamic Runner Detection Works
+
+The workflows automatically detect online runners at runtime:
+
+1. **check-runners** job queries GitHub API for runner group
+2. Finds all online runners with `haproxy` label
+3. Extracts node labels matching pattern `ha[0-9]+`
+4. Creates dynamic matrix for deployment
+
+Benefits:
+- No hardcoded node list in workflows
+- Automatically skips offline nodes
+- New nodes are picked up automatically
+
 ### Workflow Configuration
 
 ```yaml
 # .github/workflows/deploy.yml
 jobs:
+  check-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    # ... dynamic runner detection
+
   deploy:
+    needs: check-runners
+    if: needs.check-runners.outputs.has_runners == 'true'
     runs-on:
       - self-hosted
       - haproxy
       - ${{ matrix.node }}
-
     strategy:
       max-parallel: 1  # Rolling deployment
-      matrix:
-        include:
-          - node: ha01
-          - node: ha02
-          - node: ha03
+      matrix: ${{ fromJson(needs.check-runners.outputs.matrix) }}
 ```
 
 ---

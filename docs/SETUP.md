@@ -53,10 +53,24 @@ This guide walks you through setting up the HAProxy + CloudFlare deployment syst
 2. Click **"New repository secret"**
 3. Add these secrets:
 
-| Name | Value |
-|------|-------|
-| `CLOUDFLARE_API_TOKEN` | Your API token from above |
-| `CLOUDFLARE_ZONE_ID` | Your Zone ID from above |
+| Name | Value | Required For |
+|------|-------|--------------|
+| `CLOUDFLARE_API_TOKEN` | CloudFlare API token with Zone:DNS:Edit | DNS workflows |
+| `CLOUDFLARE_ZONE_ID` | Your CloudFlare Zone ID | DNS workflows |
+| `RUNNER_PAT` | GitHub PAT with `admin:org` scope | Deploy/Rollback workflows |
+
+### Create Runner PAT
+
+The `RUNNER_PAT` is needed to dynamically detect online self-hosted runners:
+
+1. Go to **GitHub** → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**
+2. Click **"Generate new token (classic)"**
+3. Configure:
+   - **Note**: `HAProxy Runner Detection`
+   - **Expiration**: Set appropriate expiration
+   - **Scopes**: Select `admin:org` (for organization runner groups)
+4. Click **"Generate token"**
+5. Copy and save as `RUNNER_PAT` secret
 
 ## Step 3: Configure Active Node File
 
@@ -146,13 +160,35 @@ Edit `haproxy/haproxy.cfg`:
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed runner setup instructions.
 
-Quick overview:
+### Create Runner Group
 
-1. Go to your repository → **Settings** → **Actions** → **Runners**
-2. Click **"New self-hosted runner"**
+1. Go to your **Organization** → **Settings** → **Actions** → **Runner groups**
+2. Click **"New runner group"**
+3. Name it `ha-servers` (or customize in workflow files)
+4. Select repositories that can use this group
+5. Click **"Create group"**
+
+### Install Runners
+
+For each HA node:
+
+1. Go to **Organization** → **Settings** → **Actions** → **Runners**
+2. Click **"New runner"** → **"New self-hosted runner"**
 3. Follow installation instructions for Linux
-4. Add labels: `self-hosted`, `haproxy`, `ha01`
-5. Repeat for each HA node with appropriate labels
+4. During configuration, add labels: `self-hosted`, `haproxy`, `ha01` (adjust node name)
+5. Add runner to the `ha-servers` group
+6. Install as service:
+   ```bash
+   sudo ./svc.sh install
+   sudo ./svc.sh start
+   ```
+
+### Runner Label Convention
+
+Each runner must have these labels:
+- `self-hosted` - Standard self-hosted runner label
+- `haproxy` - Identifies HAProxy deployment runners
+- `ha01`, `ha02`, `ha03` - Node-specific label (must match pattern `ha[0-9]+`)
 
 ## Step 7: Initial Deployment
 
