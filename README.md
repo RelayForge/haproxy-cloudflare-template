@@ -12,6 +12,7 @@ A production-ready template for deploying HAProxy across multiple high-availabil
 - ⚡ **Emergency Failover** - One-click DNS failover for disaster recovery
 - 🐳 **Docker Support** - Optional containerized deployment
 - ✅ **Config Validation** - Automatic syntax validation on pull requests
+- 📈 **Scalable** - Easily add or remove HA nodes ([scaling guide](docs/SCALING.md))
 
 ## Quick Start
 
@@ -132,6 +133,7 @@ Emergency failover for disaster recovery.
 - [HAProxy Configuration](docs/CONFIGURATION.md) - Backend setup
 - [CloudFlare DNS](docs/DNS.md) - DNS management
 - [Deployment Options](docs/DEPLOYMENT.md) - Runner setup, Docker, alternatives
+- [Scaling Guide](docs/SCALING.md) - Adding and removing HA nodes
 
 ## License
 

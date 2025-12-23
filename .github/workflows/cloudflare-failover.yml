@@ -20,10 +20,15 @@ on:
         description: 'Target HA node for DNS failover'
         type: choice
         required: true
+        # SCALING: Update this list when adding/removing nodes.
+        #          See docs/SCALING.md for complete instructions.
         options:
           - ha01
           - ha02
           - ha03
+          # Add more nodes as needed:
+          # - ha04
+          # - ha05
       reason:
         description: 'Reason for failover (for audit trail)'
         type: string

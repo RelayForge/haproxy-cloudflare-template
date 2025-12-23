@@ -112,6 +112,9 @@ frontend https_front
 #---------------------------------------------------------------------
 # Backend: Main Website
 #---------------------------------------------------------------------
+# SCALING: Add/remove server lines when scaling HA nodes.
+#          See docs/SCALING.md for complete instructions.
+#---------------------------------------------------------------------
 backend www_backend
     balance roundrobin
     option httpchk GET /health
@@ -122,6 +125,9 @@ backend www_backend
     server app1 198.51.100.11:8080 check inter 5s fall 3 rise 2
     server app2 198.51.100.12:8080 check inter 5s fall 3 rise 2
     server app3 198.51.100.13:8080 check inter 5s fall 3 rise 2
+    # Add more servers as needed:
+    # server app4 198.51.100.14:8080 check inter 5s fall 3 rise 2
+    # server app5 198.51.100.15:8080 check inter 5s fall 3 rise 2
 
 #---------------------------------------------------------------------
 # Backend: API

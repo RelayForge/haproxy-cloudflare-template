@@ -13,8 +13,14 @@ active_node: ha01
 # External (public) IP addresses for each HA node
 # CUSTOMIZE: Replace with your actual public IP addresses
 # These IPs are used for DNS A records
+#
+# SCALING: To add/remove nodes, update this map accordingly.
+#          See docs/SCALING.md for complete instructions.
 external_ips:
   # RFC 5737 example IPs - replace with your actual IPs
   ha01: "192.0.2.11"    # Example IP - replace with actual
   ha02: "192.0.2.12"    # Example IP - replace with actual
   ha03: "192.0.2.13"    # Example IP - replace with actual
+  # Add more nodes as needed:
+  # ha04: "192.0.2.14"
+  # ha05: "192.0.2.15"
