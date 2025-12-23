@@ -7,6 +7,31 @@
 # - RUNNER_PAT secret with admin:org scope for runner detection
 # - Scripts: scripts/apply_local.sh, scripts/rollback_local.sh
 # - HAProxy config: haproxy/haproxy.cfg
+#
+# TEMPLATE NOTE: This workflow is set to manual-only by default.
+# To enable automatic deployment on push to main, replace the 'on:' section with:
+#
+#   on:
+#     push:
+#       branches:
+#         - main
+#       paths:
+#         - 'haproxy/**'
+#     workflow_dispatch:
+#       inputs:
+#         confirm:
+#           description: 'Type "deploy" to confirm deployment'
+#           required: true
+#           type: string
+#
+# Then add this step to validate-input job (only for manual triggers):
+#   - name: Check confirmation
+#     if: github.event_name == 'workflow_dispatch'
+#     run: |
+#       if [[ "${{ inputs.confirm }}" != "deploy" ]]; then
+#         echo "::error::Deployment not confirmed."
+#         exit 1
+#       fi
 
 name: Deploy HAProxy
 

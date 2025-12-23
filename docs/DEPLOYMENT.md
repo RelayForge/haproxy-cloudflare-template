@@ -568,3 +568,69 @@ Best for: Single node, infrequent changes, testing.
 - One-off testing
 - Emergency fixes
 - Learning HAProxy
+
+---
+
+## Enabling Automatic Workflow Triggers
+
+By default, all workflows in this template are set to **manual dispatch only** (`workflow_dispatch`). This prevents failures when using the template before configuration is complete.
+
+Once you've set up your environment and created `haproxy/haproxy.cfg`, you can enable automatic triggers:
+
+### Enable Automatic Validation (on PR/push)
+
+Edit `.github/workflows/validate.yml` and replace the `on:` section:
+
+```yaml
+on:
+  pull_request:
+    paths:
+      - 'haproxy/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'haproxy/**'
+  workflow_dispatch:  # Keep manual trigger as fallback
+```
+
+### Enable Automatic Deployment (on push to main)
+
+Edit `.github/workflows/deploy.yml` and replace the `on:` section:
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'haproxy/**'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm deployment'
+        required: true
+        type: string
+```
+
+Then update the `validate-input` job to only check confirmation for manual triggers:
+
+```yaml
+- name: Check confirmation
+  if: github.event_name == 'workflow_dispatch'
+  run: |
+    if [[ "${{ inputs.confirm }}" != "deploy" ]]; then
+      echo "::error::Deployment not confirmed."
+      exit 1
+    fi
+```
+
+### Other Workflows
+
+The following workflows should remain manual-only for safety:
+
+| Workflow | Reason |
+|----------|--------|
+| `cloudflare-dns.yml` | DNS changes require human review |
+| `cloudflare-failover.yml` | Emergency DR action |
+| `rollback.yml` | Emergency rollback action |

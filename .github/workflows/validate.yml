@@ -1,20 +1,27 @@
 # HAProxy Configuration Validation Workflow
-# Validates haproxy.cfg syntax on every pull request
+# Validates haproxy.cfg syntax
 #
 # This workflow runs on GitHub-hosted runners and validates the configuration
 # file syntax without applying changes.
+#
+# TEMPLATE NOTE: This workflow is set to manual-only by default.
+# To enable automatic validation on push/PR, replace the 'on:' section with:
+#
+#   on:
+#     pull_request:
+#       paths:
+#         - 'haproxy/**'
+#     push:
+#       branches:
+#         - main
+#       paths:
+#         - 'haproxy/**'
+#     workflow_dispatch:  # Keep manual trigger as fallback
 
 name: Validate HAProxy Config
 
 on:
-  pull_request:
-    paths:
-      - 'haproxy/**'
-  push:
-    branches:
-      - main
-    paths:
-      - 'haproxy/**'
+  workflow_dispatch:
 
 jobs:
   validate:
