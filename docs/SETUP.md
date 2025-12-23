@@ -234,6 +234,8 @@ dig +short currentha.yourdomain.com
 
 - Ensure runners are online and have correct labels
 - Check runner logs: `journalctl -u actions.runner.* -f`
+- Verify runners are in the `ha-servers` runner group
+- Check that `RUNNER_PAT` secret has `admin:org` scope
 
 ### CloudFlare API errors
 
@@ -246,3 +248,116 @@ dig +short currentha.yourdomain.com
 - Run validation locally: `haproxy -c -f haproxy/haproxy.cfg`
 - Check for syntax errors in configuration
 - Ensure all referenced files (certs, errors) exist
+
+---
+
+## Runner Registration Errors
+
+Common errors when registering GitHub Actions self-hosted runners.
+
+### Token expired
+
+**Error:** `The registration token expired. Please generate a new token.`
+
+**Cause:** Registration tokens are valid for only **1 hour**.
+
+**Solution:**
+1. Go to **Organization** → **Settings** → **Actions** → **Runners**
+2. Click **"New runner"** to get a fresh token
+3. Re-run the configuration command with the new token
+
+---
+
+### Runner already exists
+
+**Error:** `A runner with the name 'ha01' already exists.`
+
+**Solution:**
+1. Go to **Organization** → **Settings** → **Actions** → **Runners**
+2. Find and remove the existing runner
+3. Retry registration
+
+Or use the `--replace` flag:
+```bash
+./config.sh --url https://github.com/YOUR-ORG --token YOUR-TOKEN --replace
+```
+
+---
+
+### Permission denied
+
+**Error:** `Access denied. Verify that you have admin access.`
+
+**Cause:** User lacks admin permissions or token has insufficient scope.
+
+**Solution:**
+- Ensure you have **Owner** or **Admin** role in the organization
+- For repository runners, ensure **Admin** access to the repository
+- If using GitHub CLI, ensure PAT has `admin:org` scope
+
+---
+
+### Runner group not found
+
+**Error:** `Could not find the runner group 'ha-servers'.`
+
+**Solution:**
+1. Create the runner group (see [Create Runner Group](#create-runner-group))
+2. Ensure the repository has access to the runner group
+
+---
+
+### Runner shows offline
+
+**Symptoms:** Runner shows "Offline" in GitHub even though service is running.
+
+**Diagnosis:**
+```bash
+# Check service status
+sudo ./svc.sh status
+systemctl status actions.runner.*
+
+# Check runner logs
+journalctl -u actions.runner.* -f
+
+# Test GitHub connectivity
+curl -I https://github.com
+curl -I https://api.github.com
+```
+
+**Common causes:**
+- Network/firewall blocking GitHub endpoints
+- Token expired during registration
+- Service crashed after startup
+
+**Solution:**
+```bash
+# Restart the runner service
+sudo ./svc.sh stop
+sudo ./svc.sh start
+
+# Or reconfigure with fresh token
+./config.sh remove
+./config.sh --url https://github.com/YOUR-ORG --token NEW-TOKEN ...
+```
+
+---
+
+### Network connectivity issues
+
+**Error:** `Unable to connect to GitHub.com`
+
+**Solution:** Ensure outbound HTTPS (port 443) access to:
+- `github.com`
+- `api.github.com`
+- `*.actions.githubusercontent.com`
+
+```bash
+# Test connectivity
+curl -I https://github.com
+curl -I https://api.github.com
+```
+
+---
+
+**For containerized runners:** See [docker/README.md - Runner Registration Errors](../docker/README.md#runner-registration-errors) for container-specific troubleshooting.

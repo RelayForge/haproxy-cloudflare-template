@@ -227,23 +227,189 @@ global
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `REPO_URL` | Yes | GitHub repository URL |
-| `RUNNER_TOKEN` | Yes | Runner registration token |
-| `RUNNER_NAME` | Yes | Runner name (e.g., ha01) |
-| `RUNNER_LABELS` | Yes | Labels (e.g., self-hosted,haproxy,ha01) |
-| `RUNNER_GROUP` | No | Runner group (default: ha-servers) |
+| Variable | Required | Default | Example | Description |
+|----------|----------|---------|---------|-------------|
+| `REPO_URL` | Yes | - | `https://github.com/acme/haproxy` | GitHub repository or organization URL |
+| `RUNNER_TOKEN` | Yes | - | `AABCDEF...` | Runner registration token (expires in 1 hour) |
+| `RUNNER_NAME` | Yes | - | `ha01` | Unique runner name matching node label |
+| `RUNNER_LABELS` | Yes | - | `self-hosted,haproxy,ha01` | Comma-separated labels for runner selection |
+| `RUNNER_GROUP` | No | `ha-servers` | `ha-servers` | Organization runner group name |
+| `RUNNER_WORKDIR` | No | `/workspace` | `/workspace` | Working directory for job execution |
+| `DISABLE_AUTO_UPDATE` | No | `false` | `true` | Disable automatic runner updates (recommended for containers) |
 
-### Getting Runner Token
+---
 
+### Organization vs Repository Runners
+
+| Type | URL Format | Best For | Runner Group Support |
+|------|------------|----------|---------------------|
+| **Organization** | `https://github.com/YOUR-ORG` | Multiple repos, centralized management | ✅ Yes |
+| **Repository** | `https://github.com/YOUR-ORG/YOUR-REPO` | Single repo, isolated runners | ❌ No |
+
+**Recommendation:** Use **organization runners** with runner groups for multi-node HAProxy deployments. This allows:
+- Centralized runner management
+- Runner groups for access control
+- Dynamic runner detection across repositories
+
+---
+
+### Getting Each Value
+
+#### REPO_URL
+
+The GitHub URL where the runner will be registered.
+
+**For organization runners (recommended):**
+```
+https://github.com/YOUR-ORG
+```
+
+**For repository runners:**
+```
+https://github.com/YOUR-ORG/YOUR-REPO
+```
+
+**How to find it:**
+1. Navigate to your GitHub organization or repository
+2. Copy the URL from your browser's address bar
+3. Remove any trailing paths (e.g., `/settings`)
+
+---
+
+#### RUNNER_TOKEN
+
+A temporary token used to register the runner with GitHub. **Tokens expire after 1 hour.**
+
+**Option A: Via GitHub Web UI (Recommended)**
+
+1. **For organization runners:**
+   - Go to **Organization** → **Settings** → **Actions** → **Runners**
+   - Click **"New runner"** → **"New self-hosted runner"**
+   - Select **Linux** as the operating system
+   - The token is shown in the configuration command:
+     ```bash
+     ./config.sh --url https://github.com/YOUR-ORG --token AABCDEFGHIJKLMNOP...
+     ```
+   - Copy the token value (starts with `AA...`)
+
+2. **For repository runners:**
+   - Go to **Repository** → **Settings** → **Actions** → **Runners**
+   - Click **"New self-hosted runner"**
+   - Copy the token from the configuration command
+
+**Option B: Via GitHub CLI**
+
+First, install and authenticate the GitHub CLI:
 ```bash
-# Via GitHub CLI (organization runners)
+# Install (Ubuntu/Debian)
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update && sudo apt install gh
+
+# Authenticate
+gh auth login
+```
+
+Then generate the token:
+```bash
+# Organization runners
 gh api orgs/YOUR-ORG/actions/runners/registration-token --method POST --jq '.token'
 
-# Via GitHub CLI (repository runners)
+# Repository runners
 gh api repos/YOUR-ORG/YOUR-REPO/actions/runners/registration-token --method POST --jq '.token'
 ```
+
+⚠️ **Important:** Tokens expire after **1 hour**. If registration fails with "token expired", generate a new token.
+
+---
+
+#### RUNNER_NAME
+
+A unique identifier for this runner. Must be unique across all runners in the organization/repository.
+
+**Naming convention:**
+- Match the node label for consistency: `ha01`, `ha02`, `ha03`
+- Use only alphanumeric characters, dashes, and underscores
+- Keep names short and descriptive
+
+**Examples:**
+| Node | Runner Name |
+|------|-------------|
+| HA Node 1 | `ha01` |
+| HA Node 2 | `ha02` |
+| HA Node 3 | `ha03` |
+
+---
+
+#### RUNNER_LABELS
+
+Comma-separated labels that identify this runner. Used by workflows to select which runners execute jobs.
+
+**Required labels for this template:**
+- `self-hosted` - Standard self-hosted runner identifier
+- `haproxy` - Identifies runners for HAProxy deployment
+- `ha01`/`ha02`/`ha03` - Node-specific label (must match pattern `ha[0-9]+`)
+
+**Format:**
+```
+self-hosted,haproxy,ha01
+```
+
+The dynamic runner detection in workflows uses these labels to:
+1. Find runners in the `ha-servers` group with `haproxy` label
+2. Extract node identifiers matching `ha[0-9]+` pattern
+3. Build a deployment matrix
+
+---
+
+#### RUNNER_GROUP
+
+The organization runner group this runner belongs to. Runner groups provide access control for which repositories can use runners.
+
+**Default:** `ha-servers`
+
+**To create a runner group:**
+1. Go to **Organization** → **Settings** → **Actions** → **Runner groups**
+2. Click **"New runner group"**
+3. Name: `ha-servers`
+4. Select repositories that can access this group
+5. Click **"Create group"**
+
+⚠️ **Note:** Runner groups are only available for **organization runners**, not repository runners.
+
+See also: [docs/SETUP.md](../docs/SETUP.md#step-6-set-up-self-hosted-runners) for detailed runner group setup.
+
+---
+
+#### RUNNER_WORKDIR
+
+The directory inside the container where GitHub Actions jobs are executed.
+
+**Default:** `/workspace`
+
+This directory is used for:
+- Checking out repository code during workflow runs
+- Executing scripts and commands
+- Storing temporary job files
+
+You typically don't need to change this unless you have specific path requirements.
+
+---
+
+#### DISABLE_AUTO_UPDATE
+
+Controls whether the GitHub Actions runner automatically updates itself.
+
+**Default:** `false`
+**Recommended for containers:** `true`
+
+**Why set to `true` in containers?**
+- Container images should be immutable
+- You control the runner version via the image tag
+- Auto-updates can cause unexpected behavior
+- Updates may conflict with container-installed packages
+
+**To update the runner:** Pull a new version of the `myoung34/github-runner` image.
 
 ---
 
@@ -357,4 +523,174 @@ docker compose -f docker-compose.socket-api.yml up runner -d
 ```bash
 # Check what's using the port
 netstat -tlnp | grep -E ':80|:443'
+```
+
+---
+
+## Runner Registration Errors
+
+Common errors when registering GitHub Actions runners in containers.
+
+### Token expired
+
+**Error:**
+```
+The registration token expired. Please generate a new token.
+```
+
+**Cause:** Runner registration tokens are valid for only 1 hour.
+
+**Solution:**
+1. Generate a new token via GitHub UI or CLI (see [Getting Runner Token](#runner_token))
+2. Update the `RUNNER_TOKEN` in your `.env` file
+3. Restart the runner container:
+   ```bash
+   docker compose -f docker-compose.socket-api.yml down runner
+   docker compose -f docker-compose.socket-api.yml up runner -d
+   ```
+
+---
+
+### Runner already exists
+
+**Error:**
+```
+A runner with the name 'ha01' already exists in this organization.
+```
+
+**Cause:** A runner with the same name is already registered.
+
+**Solution A: Remove the existing runner**
+1. Go to **Organization** → **Settings** → **Actions** → **Runners**
+2. Find the runner with the conflicting name
+3. Click the **⋮** menu → **Remove**
+4. Retry registration
+
+**Solution B: Use --replace flag (manual registration only)**
+```bash
+./config.sh --url https://github.com/YOUR-ORG --token YOUR-TOKEN --replace
+```
+
+---
+
+### Permission denied / Access denied
+
+**Error:**
+```
+Access denied. Verify that you have admin access to the organization or repository.
+```
+
+**Cause:** The token lacks required permissions or user isn't an admin.
+
+**Solution:**
+1. **For organization runners:** Ensure you have **Owner** or **Admin** role
+2. **For repository runners:** Ensure you have **Admin** access to the repository
+3. If using GitHub CLI, ensure your PAT has:
+   - `admin:org` scope for organization runners
+   - `repo` scope for repository runners
+
+---
+
+### Runner group not found
+
+**Error:**
+```
+Could not find the runner group 'ha-servers'.
+```
+
+**Cause:** The specified runner group doesn't exist or the repository lacks access.
+
+**Solution:**
+1. Create the runner group:
+   - Go to **Organization** → **Settings** → **Actions** → **Runner groups**
+   - Click **"New runner group"**
+   - Name: `ha-servers`
+   - Add repositories that should have access
+2. Or change `RUNNER_GROUP` to an existing group name
+
+---
+
+### Network connection failed
+
+**Error:**
+```
+Unable to connect to GitHub.com
+```
+or
+```
+A]connection attempt failed because the connected party did not properly respond
+```
+
+**Cause:** Firewall or proxy blocking GitHub endpoints.
+
+**Solution:**
+Ensure outbound HTTPS (port 443) access to:
+- `github.com`
+- `api.github.com`
+- `*.actions.githubusercontent.com`
+- `ghcr.io` (for container images)
+
+```bash
+# Test connectivity
+curl -I https://github.com
+curl -I https://api.github.com
+```
+
+---
+
+### Service installation failed
+
+**Error:**
+```
+Must run as sudo
+```
+or
+```
+Service already exists
+```
+
+**Cause:** Permission issues or previous installation remnants.
+
+**Solution:**
+```bash
+# Remove existing service
+sudo ./svc.sh uninstall
+
+# Reinstall
+sudo ./svc.sh install
+sudo ./svc.sh start
+```
+
+---
+
+### Runner offline in GitHub UI
+
+**Symptoms:** Runner shows as "Offline" in GitHub Settings even though container is running.
+
+**Diagnosis:**
+```bash
+# Check container status
+docker ps | grep github-runner
+
+# Check runner logs
+docker logs github-runner --tail 100
+
+# Check if runner process is running inside container
+docker exec github-runner ps aux | grep Runner
+```
+
+**Common causes:**
+1. Token expired during registration
+2. Network connectivity issues
+3. Runner crashed after startup
+
+**Solution:**
+```bash
+# Restart the runner container
+docker compose -f docker-compose.socket-api.yml restart runner
+
+# Or recreate with fresh token
+docker compose -f docker-compose.socket-api.yml down runner
+# Update RUNNER_TOKEN in .env
+docker compose -f docker-compose.socket-api.yml up runner -d
 ```
