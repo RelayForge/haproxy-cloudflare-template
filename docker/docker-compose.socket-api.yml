@@ -1,0 +1,80 @@
+# Docker Compose - HAProxy Runtime API (Recommended)
+# 
+# This setup uses HAProxy's runtime API socket for configuration control.
+# The runner container communicates with HAProxy via a shared Unix socket.
+#
+# Benefits:
+# - No Docker socket exposure (more secure)
+# - Granular control over HAProxy
+# - Can enable/disable servers without restart
+# - Live configuration updates
+#
+# Usage:
+#   docker compose -f docker-compose.socket-api.yml up -d
+
+volumes:
+  haproxy_socket:
+    name: haproxy_socket
+  haproxy_config:
+    name: haproxy_config
+  haproxy_backup:
+    name: haproxy_backup
+
+services:
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: haproxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # - "8404:8404"  # Stats dashboard (uncomment if enabled)
+    volumes:
+      - haproxy_config:/usr/local/etc/haproxy
+      - haproxy_socket:/var/run/haproxy
+      - ../certs:/etc/haproxy/certs:ro
+      - ../errors:/etc/haproxy/errors:ro
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  runner:
+    image: myoung34/github-runner:latest
+    container_name: github-runner
+    restart: unless-stopped
+    environment:
+      # CUSTOMIZE: Update these values
+      - REPO_URL=${REPO_URL:-https://github.com/YOUR-ORG/YOUR-REPO}
+      - RUNNER_TOKEN=${RUNNER_TOKEN}
+      - RUNNER_NAME=${RUNNER_NAME:-ha01}
+      - RUNNER_LABELS=${RUNNER_LABELS:-self-hosted,haproxy,ha01}
+      - RUNNER_GROUP=${RUNNER_GROUP:-ha-servers}
+      - RUNNER_WORKDIR=/workspace
+      - DISABLE_AUTO_UPDATE=true
+    volumes:
+      # Shared socket for HAProxy control
+      - haproxy_socket:/var/run/haproxy
+      # Shared config volume
+      - haproxy_config:/haproxy-config
+      # Backup volume
+      - haproxy_backup:/haproxy-backup
+      # Workspace for scripts
+      - ../scripts:/workspace/scripts:ro
+    working_dir: /workspace
+    depends_on:
+      haproxy:
+        condition: service_healthy
+    # Install socat for socket communication
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache socat
+        /entrypoint.sh ./bin/Runner.Listener run --startuptype service

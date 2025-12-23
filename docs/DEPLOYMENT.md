@@ -342,9 +342,101 @@ jobs:
 
 ## Option 4: Docker Deployment
 
-Best for: Containerized infrastructure, testing.
+Best for: Containerized infrastructure, testing, or environments where you want both HAProxy and the runner in containers.
 
 See [docker/README.md](../docker/README.md) for detailed Docker setup.
+
+### Deployment Sub-Options
+
+| Sub-Option | Compose File | Description |
+|------------|--------------|-------------|
+| HAProxy Only | `docker-compose.yml` | Simple standalone HAProxy |
+| Socket API (Recommended) | `docker-compose.socket-api.yml` | HAProxy + Runner with shared socket |
+| Docker Socket | `docker-compose.docker-socket.yml` | Runner controls HAProxy via Docker |
+
+### Option 4a: Socket API (Recommended)
+
+The runner and HAProxy communicate via HAProxy's Runtime API socket. This is the most secure containerized option.
+
+```bash
+cd docker
+
+# Create environment file
+cat > .env << 'EOF'
+REPO_URL=https://github.com/YOUR-ORG/YOUR-REPO
+RUNNER_TOKEN=your_runner_registration_token
+RUNNER_NAME=ha01
+RUNNER_LABELS=self-hosted,haproxy,ha01
+RUNNER_GROUP=ha-servers
+EOF
+
+# Start containers
+docker compose -f docker-compose.socket-api.yml up -d
+```
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Docker Host                          │
+│  ┌─────────────────┐       ┌────────────────────────┐  │
+│  │    HAProxy      │◄─────►│   GitHub Runner        │  │
+│  │                 │       │                        │  │
+│  │  admin.sock     │       │  socat commands        │  │
+│  └─────────────────┘       └────────────────────────┘  │
+│           ▲                         ▲                   │
+│           └───── haproxy_socket ────┘                   │
+│                 (shared volume)                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Deploy Script (in workflows):**
+
+```yaml
+- name: Deploy HAProxy config
+  run: |
+    set -euo pipefail
+    ./scripts/apply_container.sh
+```
+
+### Option 4b: Docker Socket Mount
+
+The runner controls HAProxy via the Docker socket. ⚠️ Less secure but provides full container control.
+
+```bash
+cd docker
+
+# Create environment file (same as above)
+cat > .env << 'EOF'
+REPO_URL=https://github.com/YOUR-ORG/YOUR-REPO
+RUNNER_TOKEN=your_runner_registration_token
+RUNNER_NAME=ha01
+RUNNER_LABELS=self-hosted,haproxy,ha01
+RUNNER_GROUP=ha-servers
+EOF
+
+# Start containers
+docker compose -f docker-compose.docker-socket.yml up -d
+```
+
+**Deploy Script (in workflows):**
+
+```yaml
+- name: Deploy HAProxy config
+  run: |
+    set -euo pipefail
+    ./scripts/apply_container_docker.sh
+```
+
+### Option 4c: HAProxy Only (Testing)
+
+Simple standalone HAProxy container without an integrated runner.
+
+```bash
+cd docker
+cp ../haproxy/haproxy.cfg.example ../haproxy/haproxy.cfg
+docker compose up -d
+```
 
 ### Quick Start
 
@@ -436,7 +528,9 @@ Best for: Single node, infrequent changes, testing.
 | Self-hosted Runners | Medium | High | Production, dedicated nodes |
 | GitHub + SSH | Low | Medium | No runner installation |
 | Ansible | High | High | Existing Ansible infra |
-| Docker | Low | Medium | Containerized environments |
+| Docker (Socket API) | Medium | High | Containerized production |
+| Docker (Docker Socket) | Medium | Low | Trusted container envs |
+| Docker (HAProxy Only) | Low | N/A | Testing, development |
 | Manual | None | N/A | Testing, single node |
 
 ## Choosing a Method
@@ -456,10 +550,19 @@ Best for: Single node, infrequent changes, testing.
 - You have complex pre/post deployment tasks
 - You want idempotent deployments
 
-**Use Docker if:**
-- You run containerized infrastructure
-- You want easy testing and development
-- You use Kubernetes or Docker Swarm
+**Use Docker (Socket API) if:**
+- You want containerized infrastructure
+- Security is important (no Docker socket exposure)
+- You need runtime server control (enable/disable backends)
+
+**Use Docker (Docker Socket) if:**
+- You run in a trusted environment
+- You need full container control
+- Security is less of a concern
+
+**Use Docker (HAProxy Only) for:**
+- Quick testing and development
+- Experimenting with HAProxy configuration
 
 **Use Manual for:**
 - One-off testing
