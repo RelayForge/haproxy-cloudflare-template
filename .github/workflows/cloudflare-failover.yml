@@ -1,0 +1,136 @@
+# CloudFlare DNS Failover Workflow
+# Emergency DR failover - updates DNS directly without git commit
+#
+# Usage:
+# 1. Go to Actions tab
+# 2. Select "CloudFlare DNS Failover"
+# 3. Select target node from dropdown
+# 4. Optionally provide reason
+# 5. Run workflow
+#
+# Note: This does not update active-node.yml in git. After incident resolution,
+# update the file manually to match the current state.
+
+name: CloudFlare DNS Failover
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_node:
+        description: 'Target HA node for DNS failover'
+        type: choice
+        required: true
+        options:
+          - ha01
+          - ha02
+          - ha03
+      reason:
+        description: 'Reason for failover (for audit trail)'
+        type: string
+        required: false
+
+jobs:
+  failover:
+    name: Failover to ${{ inputs.target_node }}
+    runs-on: ubuntu-latest
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq yq
+
+      - name: Log failover reason
+        run: |
+          echo "🚨 Emergency DNS Failover"
+          echo "Target node: ${{ inputs.target_node }}"
+          echo "Reason: ${{ inputs.reason || 'Not specified' }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+      - name: Get target node IP
+        id: get_ip
+        run: |
+          set -euo pipefail
+
+          TARGET_NODE="${{ inputs.target_node }}"
+          CONFIG_FILE="cloudflare/active-node.yml"
+
+          # Read external IP for target node
+          TARGET_IP=$(yq e ".external_ips.${TARGET_NODE}" "$CONFIG_FILE")
+
+          if [ -z "$TARGET_IP" ] || [ "$TARGET_IP" == "null" ]; then
+            echo "❌ Could not find external IP for node: $TARGET_NODE"
+            exit 1
+          fi
+
+          echo "target_ip=$TARGET_IP" >> $GITHUB_OUTPUT
+          echo "📍 Target IP: $TARGET_IP"
+
+      - name: Update DNS record
+        run: |
+          set -euo pipefail
+
+          # CUSTOMIZE: Update with your failover record name
+          RECORD_NAME="currentha"
+          ZONE_ID="$CLOUDFLARE_ZONE_ID"
+          TARGET_IP="${{ steps.get_ip.outputs.target_ip }}"
+
+          # Get zone name for FQDN
+          ZONE_NAME=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" | jq -r '.result.name')
+
+          FQDN="${RECORD_NAME}.${ZONE_NAME}"
+          echo "🔄 Updating $FQDN to $TARGET_IP"
+
+          # Find existing record
+          EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$FQDN&type=A" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json")
+
+          RECORD_ID=$(echo "$EXISTING" | jq -r '.result[0].id // empty')
+
+          if [ -n "$RECORD_ID" ]; then
+            # Update existing record
+            RESULT=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{
+                \"type\": \"A\",
+                \"name\": \"$RECORD_NAME\",
+                \"content\": \"$TARGET_IP\",
+                \"ttl\": 60,
+                \"proxied\": false,
+                \"comment\": \"Failover to ${{ inputs.target_node }} - ${{ inputs.reason || 'Emergency DR' }}\"
+              }")
+          else
+            # Create new record
+            RESULT=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{
+                \"type\": \"A\",
+                \"name\": \"$RECORD_NAME\",
+                \"content\": \"$TARGET_IP\",
+                \"ttl\": 60,
+                \"proxied\": false,
+                \"comment\": \"Failover to ${{ inputs.target_node }} - ${{ inputs.reason || 'Emergency DR' }}\"
+              }")
+          fi
+
+          SUCCESS=$(echo "$RESULT" | jq -r '.success')
+          if [ "$SUCCESS" != "true" ]; then
+            echo "❌ Failed to update DNS record"
+            echo "$RESULT" | jq .
+            exit 1
+          fi
+
+          echo "✅ DNS failover complete: $FQDN → $TARGET_IP"

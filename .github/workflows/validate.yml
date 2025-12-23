@@ -1,0 +1,65 @@
+# HAProxy Configuration Validation Workflow
+# Validates haproxy.cfg syntax on every pull request
+#
+# This workflow runs on GitHub-hosted runners and validates the configuration
+# file syntax without applying changes.
+
+name: Validate HAProxy Config
+
+on:
+  pull_request:
+    paths:
+      - 'haproxy/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'haproxy/**'
+
+jobs:
+  validate:
+    name: Validate Configuration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install HAProxy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y haproxy
+
+      - name: Validate HAProxy configuration
+        run: |
+          set -euo pipefail
+          echo "🔍 Validating HAProxy configuration..."
+          haproxy -c -f haproxy/haproxy.cfg
+          echo "✅ Configuration syntax is valid"
+
+      - name: Check for common issues
+        run: |
+          set -euo pipefail
+          CONFIG="haproxy/haproxy.cfg"
+
+          echo "🔍 Checking for common configuration issues..."
+
+          # Check for duplicate backend names
+          BACKENDS=$(grep -E "^backend\s+" "$CONFIG" | awk '{print $2}' | sort)
+          DUPLICATES=$(echo "$BACKENDS" | uniq -d)
+          if [ -n "$DUPLICATES" ]; then
+            echo "❌ Duplicate backend names found:"
+            echo "$DUPLICATES"
+            exit 1
+          fi
+
+          # Check for duplicate frontend names
+          FRONTENDS=$(grep -E "^frontend\s+" "$CONFIG" | awk '{print $2}' | sort)
+          DUPLICATES=$(echo "$FRONTENDS" | uniq -d)
+          if [ -n "$DUPLICATES" ]; then
+            echo "❌ Duplicate frontend names found:"
+            echo "$DUPLICATES"
+            exit 1
+          fi
+
+          echo "✅ No common issues detected"

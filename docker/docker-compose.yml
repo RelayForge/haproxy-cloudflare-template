@@ -1,0 +1,68 @@
+# Docker Compose for HAProxy
+# Use this for containerized HAProxy deployments
+#
+# Usage:
+#   docker compose up -d          # Start HAProxy
+#   docker compose logs -f        # View logs
+#   docker compose restart        # Reload configuration
+#   docker compose down           # Stop HAProxy
+#
+# Prerequisites:
+#   - Copy haproxy/haproxy.cfg.example to haproxy/haproxy.cfg
+#   - Add SSL certificates to certs/ directory
+#   - Customize configuration for your environment
+
+services:
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: haproxy
+    restart: unless-stopped
+    
+    ports:
+      - "80:80"       # HTTP
+      - "443:443"     # HTTPS
+      # - "8404:8404" # Stats (uncomment if enabled in config)
+    
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./certs:/etc/haproxy/certs:ro
+      - ./errors:/etc/haproxy/errors:ro
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Optional: Add additional services here
+# Example: Stats exporter for Prometheus
+# 
+#   haproxy-exporter:
+#     image: prom/haproxy-exporter
+#     container_name: haproxy-exporter
+#     restart: unless-stopped
+#     command:
+#       - '--haproxy.scrape-uri=http://haproxy:8404/stats?stats;csv'
+#     ports:
+#       - "9101:9101"
+#     depends_on:
+#       - haproxy

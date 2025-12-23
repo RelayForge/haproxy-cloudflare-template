@@ -1,0 +1,69 @@
+# HAProxy Rollback Workflow
+# Manually trigger rollback to last known good configuration
+#
+# Usage:
+# 1. Go to Actions tab
+# 2. Select "Rollback HAProxy"
+# 3. Click "Run workflow"
+# 4. Optionally filter to specific node(s)
+
+name: Rollback HAProxy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_node:
+        description: 'Target node (leave empty for all nodes)'
+        type: choice
+        required: false
+        default: 'all'
+        options:
+          - all
+          - ha01
+          - ha02
+          - ha03
+      reason:
+        description: 'Reason for rollback'
+        type: string
+        required: false
+
+concurrency:
+  group: haproxy-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Rollback ${{ matrix.node }}
+    runs-on:
+      - self-hosted
+      - haproxy
+      - ${{ matrix.node }}
+
+    # Run on all nodes or just the specified one
+    if: ${{ inputs.target_node == 'all' || inputs.target_node == matrix.node }}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        # CUSTOMIZE: Update with your HA node names
+        include:
+          - node: ha01
+          - node: ha02
+          - node: ha03
+
+    steps:
+      - name: Log rollback reason
+        if: ${{ inputs.reason }}
+        run: |
+          echo "📝 Rollback reason: ${{ inputs.reason }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Execute rollback
+        run: |
+          set -euo pipefail
+          echo "🔄 Rolling back HAProxy configuration on ${{ matrix.node }}..."
+          ./scripts/rollback_local.sh
+          echo "✅ Rollback completed successfully"

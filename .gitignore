@@ -1,0 +1,42 @@
+# Active configuration files (contain real values)
+cloudflare/active-node.yml
+cloudflare/dns-records.yml
+haproxy/haproxy.cfg
+
+# SSL Certificates
+certs/
+*.pem
+*.key
+*.crt
+*.p12
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Backup files
+backup/
+*.backup
+*.bak
+*.LKG
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp

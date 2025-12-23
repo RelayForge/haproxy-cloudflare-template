@@ -1,0 +1,68 @@
+# CloudFlare DNS Records Configuration
+# Declarative DNS record management for HAProxy-routed applications
+#
+# Sync modes:
+# - check: Validate config and API connection
+# - plan: Dry-run, shows what would be created/updated
+# - apply: Creates/updates records (additive only, no deletes)
+#
+# Record types supported:
+# - A: Direct IP address
+# - CNAME: Alias to another record
+# - AAAA: IPv6 address
+#
+# Variables:
+# - {{active_node_ip}}: Replaced with IP from active-node.yml
+#
+# Run: gh workflow run cloudflare-dns.yml -f mode=apply
+
+zones:
+  # CUSTOMIZE: Replace with your domain
+  - zone: example.com
+    records:
+      # Failover record - points to active HA node
+      # This is the target for CNAME records and is NOT proxied (direct IP)
+      - name: currentha
+        type: A
+        content: "{{active_node_ip}}"
+        proxied: false
+        ttl: 60
+        comment: "Active HA node for failover"
+
+      # Application records - CNAME to currentha for automatic failover
+      # CUSTOMIZE: Add your application subdomains here
+      
+      # Example: Main website
+      - name: www
+        type: CNAME
+        content: currentha.example.com
+        proxied: true
+        comment: "Main website - Production"
+
+      # Example: API endpoint
+      - name: api
+        type: CNAME
+        content: currentha.example.com
+        proxied: true
+        comment: "API endpoint - Production"
+
+      # Example: Admin panel
+      - name: admin
+        type: CNAME
+        content: currentha.example.com
+        proxied: true
+        comment: "Admin panel - Production"
+
+      # Example: Staging environment
+      - name: staging
+        type: CNAME
+        content: currentha.example.com
+        proxied: true
+        comment: "Staging environment"
+
+      # Example: Direct A record (not using failover)
+      # - name: static
+      #   type: A
+      #   content: "192.0.2.100"
+      #   proxied: true
+      #   comment: "Static assets CDN"

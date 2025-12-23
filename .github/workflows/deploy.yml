@@ -1,0 +1,70 @@
+# HAProxy Rolling Deployment Workflow
+# Deploys haproxy.cfg to all HA nodes sequentially with automatic rollback on failure
+#
+# Prerequisites:
+# - Self-hosted runners on each HA node with labels: self-hosted, haproxy, <node-name>
+# - Scripts: scripts/apply_local.sh, scripts/rollback_local.sh
+# - HAProxy config: haproxy/haproxy.cfg
+
+name: Deploy HAProxy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'haproxy/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate config only (no reload)'
+        type: boolean
+        default: false
+
+# Prevent concurrent deployments
+concurrency:
+  group: haproxy-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ matrix.node }}
+    runs-on:
+      - self-hosted
+      - haproxy
+      - ${{ matrix.node }}
+
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        # CUSTOMIZE: Update with your HA node names
+        # These must match the runner labels on each node
+        include:
+          - node: ha01
+          - node: ha02
+          - node: ha03
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate HAProxy configuration
+        run: |
+          set -euo pipefail
+          echo "Validating HAProxy configuration..."
+          sudo /usr/sbin/haproxy -c -f haproxy/haproxy.cfg
+          echo "✅ Configuration is valid"
+
+      - name: Apply configuration
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          ./scripts/apply_local.sh
+
+      - name: Rollback on failure
+        if: failure() && !inputs.dry_run
+        run: |
+          set -euo pipefail
+          echo "⚠️ Deployment failed, initiating rollback..."
+          ./scripts/rollback_local.sh

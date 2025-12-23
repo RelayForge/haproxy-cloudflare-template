@@ -1,0 +1,200 @@
+#---------------------------------------------------------------------
+# HAProxy Configuration Template
+# High-Availability Load Balancer / Reverse Proxy
+#---------------------------------------------------------------------
+# Documentation: https://www.haproxy.com/documentation/
+#
+# CUSTOMIZE: Search for "CUSTOMIZE" comments to find sections
+#            that need to be updated for your environment
+#---------------------------------------------------------------------
+
+#---------------------------------------------------------------------
+# Global settings
+#---------------------------------------------------------------------
+global
+    log /dev/log    local0
+    log /dev/log    local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+
+    # SSL/TLS settings
+    ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+    ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+    tune.ssl.default-dh-param 2048
+
+#---------------------------------------------------------------------
+# Default settings
+#---------------------------------------------------------------------
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    option  forwardfor
+    option  http-server-close
+    timeout connect 5000ms
+    timeout client  50000ms
+    timeout server  50000ms
+
+    # Error pages (optional)
+    # CUSTOMIZE: Add custom error pages if needed
+    # errorfile 400 /etc/haproxy/errors/400.http
+    # errorfile 403 /etc/haproxy/errors/403.http
+    # errorfile 408 /etc/haproxy/errors/408.http
+    # errorfile 500 /etc/haproxy/errors/500.http
+    # errorfile 502 /etc/haproxy/errors/502.http
+    # errorfile 503 /etc/haproxy/errors/503.http
+    # errorfile 504 /etc/haproxy/errors/504.http
+
+#---------------------------------------------------------------------
+# Stats page (optional)
+#---------------------------------------------------------------------
+# Uncomment to enable HAProxy stats dashboard
+# listen stats
+#     bind *:8404
+#     mode http
+#     stats enable
+#     stats uri /stats
+#     stats refresh 10s
+#     stats admin if LOCALHOST
+#     # CUSTOMIZE: Set authentication for stats page
+#     # stats auth admin:your-secure-password
+
+#---------------------------------------------------------------------
+# HTTP Frontend - Redirect to HTTPS
+#---------------------------------------------------------------------
+frontend http_front
+    bind *:80
+    mode http
+
+    # Redirect all HTTP to HTTPS
+    http-request redirect scheme https code 301 unless { ssl_fc }
+
+#---------------------------------------------------------------------
+# HTTPS Frontend - Main entry point
+#---------------------------------------------------------------------
+frontend https_front
+    bind *:443 ssl crt /etc/haproxy/certs/
+    mode http
+
+    # Security headers
+    http-response set-header X-Frame-Options SAMEORIGIN
+    http-response set-header X-Content-Type-Options nosniff
+    http-response set-header X-XSS-Protection "1; mode=block"
+
+    # CUSTOMIZE: Add your domain ACLs here
+    # Use RFC 2606 example domains - replace with your actual domains
+    
+    # Host-based routing ACLs
+    acl is_www hdr(host) -i www.example.com
+    acl is_api hdr(host) -i api.example.com
+    acl is_admin hdr(host) -i admin.example.com
+    acl is_staging hdr(host) -i staging.example.com
+
+    # Path-based routing ACLs (optional)
+    acl is_api_path path_beg /api/
+
+    # Route to backends
+    use_backend www_backend if is_www
+    use_backend api_backend if is_api
+    use_backend api_backend if is_api_path
+    use_backend admin_backend if is_admin
+    use_backend staging_backend if is_staging
+
+    # Default backend
+    default_backend www_backend
+
+#---------------------------------------------------------------------
+# Backend: Main Website
+#---------------------------------------------------------------------
+backend www_backend
+    balance roundrobin
+    option httpchk GET /health
+    http-check expect status 200
+
+    # CUSTOMIZE: Replace with your actual backend server IPs
+    # Using RFC 5737 documentation IPs as examples
+    server app1 198.51.100.11:8080 check inter 5s fall 3 rise 2
+    server app2 198.51.100.12:8080 check inter 5s fall 3 rise 2
+    server app3 198.51.100.13:8080 check inter 5s fall 3 rise 2
+
+#---------------------------------------------------------------------
+# Backend: API
+#---------------------------------------------------------------------
+backend api_backend
+    balance roundrobin
+    option httpchk GET /health
+    http-check expect status 200
+
+    # CUSTOMIZE: Replace with your actual backend server IPs
+    server api1 198.51.100.21:3000 check inter 5s fall 3 rise 2
+    server api2 198.51.100.22:3000 check inter 5s fall 3 rise 2
+    server api3 198.51.100.23:3000 check inter 5s fall 3 rise 2
+
+#---------------------------------------------------------------------
+# Backend: Admin Panel
+#---------------------------------------------------------------------
+backend admin_backend
+    balance roundrobin
+    option httpchk GET /health
+    http-check expect status 200
+
+    # Sticky sessions for admin panel (recommended)
+    cookie SERVERID insert indirect nocache
+
+    # CUSTOMIZE: Replace with your actual backend server IPs
+    server admin1 198.51.100.31:4173 check inter 5s fall 3 rise 2 cookie admin1
+    server admin2 198.51.100.32:4173 check inter 5s fall 3 rise 2 cookie admin2
+    server admin3 198.51.100.33:4173 check inter 5s fall 3 rise 2 cookie admin3
+
+#---------------------------------------------------------------------
+# Backend: Staging Environment
+#---------------------------------------------------------------------
+backend staging_backend
+    balance roundrobin
+    option httpchk GET /health
+    http-check expect status 200
+
+    # CUSTOMIZE: Replace with your actual backend server IPs
+    server staging1 198.51.100.41:4174 check inter 5s fall 3 rise 2
+
+#---------------------------------------------------------------------
+# Backend: Example TCP backend (for non-HTTP services)
+#---------------------------------------------------------------------
+# Uncomment and customize for TCP load balancing
+# backend database_backend
+#     mode tcp
+#     balance roundrobin
+#     option tcp-check
+#     
+#     server db1 198.51.100.51:5432 check inter 5s fall 3 rise 2
+#     server db2 198.51.100.52:5432 check inter 5s fall 3 rise 2
+
+#---------------------------------------------------------------------
+# Notes:
+#---------------------------------------------------------------------
+# Health check options:
+#   option httpchk GET /health       - HTTP health check
+#   http-check expect status 200     - Expected response code
+#   option tcp-check                 - TCP-only health check
+#
+# Server options:
+#   check              - Enable health checks
+#   inter 5s           - Check interval
+#   fall 3             - Failures before marking down
+#   rise 2             - Successes before marking up
+#   weight 100         - Load balancing weight
+#   backup             - Only use if primary servers are down
+#   disabled           - Temporarily disable server
+#
+# Balance algorithms:
+#   roundrobin         - Equal distribution
+#   leastconn          - Least connections
+#   source             - Client IP hash (sticky by IP)
+#   uri                - URI hash
+#---------------------------------------------------------------------

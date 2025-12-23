@@ -1,0 +1,20 @@
+# CloudFlare Active Node Configuration
+# This file defines which HA node currently receives traffic via DNS
+#
+# Usage:
+# - Update 'active_node' to failover traffic to a different node
+# - The cloudflare-dns workflow reads this file to determine the target IP
+# - For emergency failover, use the cloudflare-failover workflow instead
+
+# Current active node for DNS routing
+# CUSTOMIZE: Set to your preferred default node
+active_node: ha01
+
+# External (public) IP addresses for each HA node
+# CUSTOMIZE: Replace with your actual public IP addresses
+# These IPs are used for DNS A records
+external_ips:
+  # RFC 5737 example IPs - replace with your actual IPs
+  ha01: "192.0.2.11"    # Example IP - replace with actual
+  ha02: "192.0.2.12"    # Example IP - replace with actual
+  ha03: "192.0.2.13"    # Example IP - replace with actual

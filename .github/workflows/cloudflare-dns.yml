@@ -1,0 +1,90 @@
+# CloudFlare DNS Sync Workflow
+# Synchronizes DNS records from cloudflare/dns-records.yml to CloudFlare
+#
+# Prerequisites:
+# - CLOUDFLARE_API_TOKEN secret with Zone:DNS:Edit permission
+# - CLOUDFLARE_ZONE_ID secret with your zone ID
+#
+# Modes:
+# - check: Validate config and API connection (no changes)
+# - plan: Dry-run showing what would be created/updated
+# - apply: Create/update records (additive only, no deletes)
+
+name: CloudFlare DNS Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode'
+        type: choice
+        required: true
+        default: 'plan'
+        options:
+          - check
+          - plan
+          - apply
+      filter:
+        description: 'Only process records matching this name (optional)'
+        type: string
+        required: false
+      force_overwrite:
+        description: 'Delete existing records with conflicting types (e.g., A→CNAME)'
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    name: Sync DNS Records (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq yq
+
+      - name: Validate secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "❌ CLOUDFLARE_API_TOKEN secret is not set"
+            exit 1
+          fi
+          if [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+            echo "❌ CLOUDFLARE_ZONE_ID secret is not set"
+            exit 1
+          fi
+          echo "✅ Required secrets are configured"
+
+      - name: Run DNS sync
+        run: |
+          set -euo pipefail
+
+          MODE="${{ inputs.mode }}"
+          FILTER="${{ inputs.filter }}"
+          FORCE="${{ inputs.force_overwrite }}"
+
+          ARGS=""
+          case "$MODE" in
+            check) ARGS="--check" ;;
+            plan)  ARGS="--plan" ;;
+            apply) ARGS="--apply" ;;
+          esac
+
+          if [ -n "$FILTER" ]; then
+            export DNS_FILTER="$FILTER"
+          fi
+
+          if [ "$FORCE" == "true" ]; then
+            export FORCE_OVERWRITE="true"
+          fi
+
+          chmod +x ./scripts/cloudflare_sync.sh
+          ./scripts/cloudflare_sync.sh $ARGS
